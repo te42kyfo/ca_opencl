@@ -63,19 +63,15 @@ void dataLoad(string filename, Fargs args, vector<vector<int>>& innerPointIds,
           points[level + 1].Y.push_back(x);
           points[level + 1].Z.push_back(x);
         }
-
-        if (j < 3) cout << x << " " << y << " " << z << " ";
       }
-      cout << "\n";
     }
-    cout << "\n";
   }
 
   fclose(fin);
 }
 
 int main(int argc, char** argv) {
-  OCL ocl(1);
+  OCL ocl(0);
   cl_kernel init_buckets_kernel =
       ocl.buildKernel("kernels.cl", "initBuckets", "-D MAX_BUCKET_SIZE=48");
 
@@ -85,4 +81,36 @@ int main(int argc, char** argv) {
   vector<XYZVector> points(numLayers);
 
   dataLoad("log.in", args, innerPointIds, outerPointIds, points);
+
+  vector<cl_mem> d_innerPointIds(numLevels);
+  vector<cl_mem> d_outerPointIds(numLevels);
+  for (int level = 0; level < numLevels; level++) {
+    d_innerPointIds[level] = ocl.createAndUpload(innerPointIds[level]);
+    d_outerPointIds[level] = ocl.createAndUpload(outerPointIds[level]);
+  }
+  int totalPointCount = 0;
+  for (int layer = 0; layer < numLayers; layer++) {
+    totalPointCount += points[layer].X.size();
+  }
+
+  vector<int> pointBuckets(totalPointCount * 48);
+  vector<int> bucketSizes(totalPointCount * 48, 0);
+
+  cl_mem d_pointBuckets = ocl.createAndUpload(pointBuckets);
+  cl_mem d_bucketSizes = ocl.createAndUpload(bucketSizes);
+
+  for (int level = 0; level < 1; level++) {
+    ocl.execute(init_buckets_kernel, 1, {64}, {64}, d_innerPointIds[level],
+                (int)innerPointIds[level].size(), d_pointBuckets,
+                d_bucketSizes);
+  }
+
+  auto result_sizes = ocl.download<int>(d_bucketSizes);
+  auto result_buckets = ocl.download<int>(d_pointBuckets);
+  for (int i = 0; i < 5; i++) {
+    for (int n = 0; n < result_sizes[i]; n++) {
+      cout << result_buckets[i * 48 + n] << " ";
+    }
+    cout << "\n";
+  }
 }
