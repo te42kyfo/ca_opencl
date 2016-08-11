@@ -7,8 +7,10 @@ __kernel void initBuckets(__global int* innerPointIds, int doubletCount,
   for (int doubletId = tidx; doubletId < doubletCount;
        doubletId += get_global_size(0)) {
     int pointId = innerPointIds[doubletId];
-    if (pointId < 5) printf("%d %d\n", doubletId, pointId);
     int oldSize = atomic_inc(&bucketSizes[pointId]);
-    pointBuckets[pointId * MAX_BUCKET_SIZE + oldSize] = doubletId;
+    if (oldSize < MAX_BUCKET_SIZE)
+      pointBuckets[pointId * MAX_BUCKET_SIZE + oldSize] = doubletId;
   }
 }
+
+__kernel void connectDoublets() { int tidx = get_global_id(0); }

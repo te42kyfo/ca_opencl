@@ -7,6 +7,7 @@ using namespace std;
 
 const int numLayers = 4;
 const int numLevels = numLayers - 1;
+const int maxBucketSize = 64;
 
 struct Fargs {
   float ptMin;
@@ -73,7 +74,8 @@ void dataLoad(string filename, Fargs args, vector<vector<int>>& innerPointIds,
 int main(int argc, char** argv) {
   OCL ocl(0);
   cl_kernel init_buckets_kernel =
-      ocl.buildKernel("kernels.cl", "initBuckets", "-D MAX_BUCKET_SIZE=48");
+      ocl.buildKernel("kernels.cl", "initBuckets",
+                      "-D MAX_BUCKET_SIZE=" + to_string(maxBucketSize));
 
   Fargs args;
   vector<vector<int>> innerPointIds(numLevels);
@@ -93,24 +95,17 @@ int main(int argc, char** argv) {
     totalPointCount += points[layer].X.size();
   }
 
-  vector<int> pointBuckets(totalPointCount * 48);
-  vector<int> bucketSizes(totalPointCount * 48, 0);
+  vector<int> pointBuckets(totalPointCount * maxBucketSize);
+  vector<int> bucketSizes(totalPointCount *  maxBucketSize, 0);
 
   cl_mem d_pointBuckets = ocl.createAndUpload(pointBuckets);
   cl_mem d_bucketSizes = ocl.createAndUpload(bucketSizes);
 
-  for (int level = 0; level < 1; level++) {
-    ocl.execute(init_buckets_kernel, 1, {64}, {64}, d_innerPointIds[level],
+  for (int level = 0; level < numLevels; level++) {
+    ocl.execute(init_buckets_kernel, 1, {1024}, {64}, d_innerPointIds[level],
                 (int)innerPointIds[level].size(), d_pointBuckets,
                 d_bucketSizes);
   }
 
-  auto result_sizes = ocl.download<int>(d_bucketSizes);
-  auto result_buckets = ocl.download<int>(d_pointBuckets);
-  for (int i = 0; i < 5; i++) {
-    for (int n = 0; n < result_sizes[i]; n++) {
-      cout << result_buckets[i * 48 + n] << " ";
-    }
-    cout << "\n";
-  }
+
 }
