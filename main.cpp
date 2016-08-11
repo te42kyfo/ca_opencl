@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include "ocl.hpp"
 
 using namespace std;
 
@@ -22,8 +23,8 @@ struct XYZVector {
   vector<float> Z;
 };
 
-void dataLoad(string filename, Fargs args, vector<vector<int>>& innerDoubletIds,
-              vector<vector<int>>& outerDoubleIds, vector<XYZVector>& points) {
+void dataLoad(string filename, Fargs args, vector<vector<int>>& innerPointIds,
+              vector<vector<int>>& outerPointIds, vector<XYZVector>& points) {
   FILE* fin = fopen(filename.c_str(), "r");
 
   fscanf(fin, "%f", &args.ptMin);
@@ -36,11 +37,11 @@ void dataLoad(string filename, Fargs args, vector<vector<int>>& innerDoubletIds,
   for (int level = 0; level < numLevels; level++) {
     int doubletCount = 0;
     fscanf(fin, "%d", &doubletCount);
-    innerDoubletIds[level].resize(doubletCount);
-    outerDoubleIds[level].resize(doubletCount);
+    innerPointIds[level].resize(doubletCount);
+    outerPointIds[level].resize(doubletCount);
     for (int j = 0; j < doubletCount; j++) {
-      fscanf(fin, "%d", &innerDoubletIds[level][j]);
-      fscanf(fin, "%d", &outerDoubleIds[level][j]);
+      fscanf(fin, "%d", &innerPointIds[level][j]);
+      fscanf(fin, "%d", &outerPointIds[level][j]);
     }
 
     for (int k = 0; k < 2; k++) {
@@ -74,9 +75,14 @@ void dataLoad(string filename, Fargs args, vector<vector<int>>& innerDoubletIds,
 }
 
 int main(int argc, char** argv) {
+  OCL ocl(1);
+  cl_kernel init_buckets_kernel =
+      ocl.buildKernel("kernels.cl", "initBuckets", "-D MAX_BUCKET_SIZE=48");
+
   Fargs args;
-  vector<vector<int>> innerDoubletIds(numLevels);
-  vector<vector<int>> outerDoubletIds(numLevels);
+  vector<vector<int>> innerPointIds(numLevels);
+  vector<vector<int>> outerPointIds(numLevels);
   vector<XYZVector> points(numLayers);
-  dataLoad("log.in", args, innerDoubletIds, outerDoubletIds, points);
+
+  dataLoad("log.in", args, innerPointIds, outerPointIds, points);
 }
