@@ -24,7 +24,21 @@ struct XYZVector {
   vector<float> Z;
 };
 
-void dataLoad(string filename, Fargs args, vector<vector<int>>& innerPointIds,
+struct d_XYZVector {
+  cl_mem X;
+  cl_mem Y;
+  cl_mem Z;
+};
+
+d_XYZVector createAndUploadXYZVector(OCL& ocl, XYZVector vec) {
+  d_XYZVector result;
+  result.X = ocl.createAndUpload(vec.X);
+  result.Y = ocl.createAndUpload(vec.Y);
+  result.Z = ocl.createAndUpload(vec.Z);
+  return result;
+}
+
+void dataLoad(string filename, Fargs& args, vector<vector<int>>& innerPointIds,
               vector<vector<int>>& outerPointIds, vector<XYZVector>& points) {
   FILE* fin = fopen(filename.c_str(), "r");
 
@@ -84,8 +98,13 @@ int main(int argc, char** argv) {
   vector<vector<int>> innerPointIds(numLevels);
   vector<vector<int>> outerPointIds(numLevels);
   vector<XYZVector> points(numLayers);
+  vector<d_XYZVector> d_points(numLayers);
 
   dataLoad("log.in", args, innerPointIds, outerPointIds, points);
+
+  for (int layer = 0; layer < numLayers; layer++) {
+    d_points[layer] = createAndUploadXYZVector(ocl, points[layer]);
+  }
 
   vector<cl_mem> d_innerPointIds(numLevels);
   vector<cl_mem> d_outerPointIds(numLevels);
@@ -97,22 +116,28 @@ int main(int argc, char** argv) {
     d_outerPointIds[level] = ocl.createAndUpload(outerPointIds[level]);
     doubletStarts[level + 1] =
         doubletStarts[level] + innerPointIds[level].size();
+    cout << level << ": " << innerPointIds[level].size() << " "
+         << outerPointIds[level].size() << "\n";
   }
   int totalPointCount = 0;
   for (int layer = 0; layer < numLayers; layer++) {
     totalPointCount += points[layer].X.size();
   }
 
-  vector<int> pointBuckets(totalPointCount * maxBucketSize);
-  vector<int> pointBucketSizes(totalPointCount * maxBucketSize, 0);
+  vector<vector<int>> pointBuckets(numLevels);
+  vector<vector<int>> pointBucketsSizes(numLevels);
 
-  cl_mem d_pointBuckets = ocl.createAndUpload(pointBuckets);
-  cl_mem d_pointBucketsSizes = ocl.createAndUpload(pointBucketSizes);
+  vector<cl_mem> d_pointBuckets(numLevels);
+  vector<cl_mem> d_pointBucketsSizes(numLevels);
 
   for (int level = 0; level < numLevels; level++) {
-    ocl.execute(initBuckets_kernel, 1, {1024}, {64}, d_innerPointIds[level],
-                (int)innerPointIds[level].size(), d_pointBuckets,
-                d_pointBucketsSizes);
+    pointBuckets[level].resize(maxBucketSize * points[level + 1].X.size());
+    pointBucketsSizes[level].resize(points[level + 1].X.size());
+    d_pointBuckets[level] = ocl.createAndUpload(pointBuckets[level]);
+    d_pointBucketsSizes[level] = ocl.createAndUpload(pointBucketsSizes[level]);
+    ocl.execute(initBuckets_kernel, 1, {1}, {1}, d_outerPointIds[level],
+                (int)outerPointIds[level].size(), d_pointBuckets[level],
+                d_pointBucketsSizes[level]);
   }
 
   vector<int> connectedDoublets(doubletStarts[numLayers - 1] * maxBucketSize);
@@ -121,19 +146,24 @@ int main(int argc, char** argv) {
   cl_mem d_connectedDoublets = ocl.createAndUpload(connectedDoublets);
   cl_mem d_connectedDoubletsSizes = ocl.createAndUpload(connectedDoubletsSizes);
 
-  for (int level = 0; level < numLevels; level++) {
-    ocl.execute(connectDoublets_kernel, 1, {1024}, {64}, d_outerPointIds[level],
-                doubletStarts[level], doubletStarts[level + 1], d_pointBuckets,
-                d_pointBucketsSizes, d_connectedDoublets,
-                d_connectedDoubletsSizes);
+  for (int level = 1; level < numLevels; level++) {
+    ocl.execute(
+        connectDoublets_kernel, 1, {1}, {1}, d_innerPointIds[level - 1],
+        d_innerPointIds[level], d_outerPointIds[level], doubletStarts[level],
+        doubletStarts[level + 1], d_pointBuckets[level - 1],
+        d_pointBucketsSizes[level - 1], d_connectedDoublets,
+        d_connectedDoubletsSizes, d_points[level - 1].X, d_points[level - 1].Y,
+        d_points[level - 1].Z, d_points[level + 0].X, d_points[level + 0].Y,
+        d_points[level + 0].Z, d_points[level + 1].X, d_points[level + 1].Y,
+        d_points[level + 1].Z, args.ptMin, args.thetaCut);
   }
 
-  auto result = ocl.download<int>(d_connectedDoublets);
+  /*  auto result = ocl.download<int>(d_connectedDoublets);
   for (int i = 0; i < 150; i++) {
     cout << i << " " << outerPointIds[0][i] << ": ";
     for (int n = 0; n < maxBucketSize; n++) {
       cout << result[i * maxBucketSize + n] << " ";
     }
     cout << "\n";
-  }
+    }*/
 }
