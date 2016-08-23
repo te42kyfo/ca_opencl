@@ -155,15 +155,19 @@ int main(int argc, char** argv) {
         d_connectedDoubletsSizes, d_points[level - 1].X, d_points[level - 1].Y,
         d_points[level - 1].Z, d_points[level + 0].X, d_points[level + 0].Y,
         d_points[level + 0].Z, d_points[level + 1].X, d_points[level + 1].Y,
-        d_points[level + 1].Z, args.ptMin, args.thetaCut);
+        d_points[level + 1].Z, args.ptMin, args.regionOriginX,
+        args.regionOriginY, args.regionOriginRadius, args.thetaCut,
+        args.phiCut);
   }
 
-  /*  auto result = ocl.download<int>(d_connectedDoublets);
-  for (int i = 0; i < 150; i++) {
-    cout << i << " " << outerPointIds[0][i] << ": ";
-    for (int n = 0; n < maxBucketSize; n++) {
-      cout << result[i * maxBucketSize + n] << " ";
+  auto result = ocl.download<int>(d_connectedDoublets);
+  for (int i = 0; i < doubletStarts[numLevels]; i++) {
+    if (result[i * maxBucketSize] != 0) {
+      cout << i << " " << outerPointIds[0][i] << ": ";
+      for (int n = 0; n < maxBucketSize; n++) {
+        cout << result[i * maxBucketSize + n] << " ";
+      }
+      cout << "\n";
     }
-    cout << "\n";
-    }*/
+  }
 }

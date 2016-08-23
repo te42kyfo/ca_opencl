@@ -23,21 +23,11 @@ bool are_aligned_RZ(float r1, float z1, float r2, float z2, float r3, float z3,
   return tan_12_13_half * ptmin <= thetaCut;
 }
 
-/*
-bool have_similar_curvature(const OMPCACell* this, const OMPCACell* otherCell,
-                            const float region_origin_x,
+bool have_similar_curvature(float x1, float y1, float x2, float y2, float x3,
+                            float y3, const float region_origin_x,
                             const float region_origin_y,
                             const float region_origin_radius,
                             const float phiCut) {
-  float x1 = get_inner_x(otherCell);
-  float y1 = get_inner_y(otherCell);
-
-  float x2 = get_inner_x(this);
-  float y2 = get_inner_y(this);
-
-  float x3 = get_outer_x(this);
-  float y3 = get_outer_y(this);
-
   float precision = 0.5f;
   float offset = x2 * x2 + y2 * y2;
 
@@ -74,15 +64,17 @@ bool have_similar_curvature(const OMPCACell* this, const OMPCACell* otherCell,
     return false;
   }
 }
-*/
+
 __kernel void connectDoublets(
     global int* pointIds1, global int* pointIds2, global int* pointIds3,
     int doubletIdStart, int doubletIdEnd, global int* pointBuckets,
     global int* pointBucketsSizes, global int* connectedDoublets,
-    global int* connectedDoubletsSizes, global float* x1, global float* y1,
-    global float* z1, global float* x2, global float* y2, global float* z2,
-    global float* x3, global float* y3, global float* z3, float ptmin,
-    float thetaCut) {
+    global int* connectedDoubletsSizes, global float* pointsX1,
+    global float* pointsY1, global float* pointsZ1, global float* pointsX2,
+    global float* pointsY2, global float* pointsZ2, global float* pointsX3,
+    global float* pointsY3, global float* pointsZ3, float ptMin,
+    float regionOriginX, float regionOriginY, float regionOriginRadius,
+    float thetaCut, float phiCut) {
   int tidx = get_global_id(0);
 
   for (int doubletId = tidx; doubletId < (doubletIdEnd - doubletIdStart);
@@ -91,18 +83,29 @@ __kernel void connectDoublets(
       int connectedDoubletId =
           pointBuckets[pointIds2[doubletId] * MAX_BUCKET_SIZE + p];
 
-      float r1 = hypot(x1[pointIds1[connectedDoubletId]],
-                       y1[pointIds1[connectedDoubletId]]);
-      float r2 = hypot(x2[pointIds2[doubletId]], y2[pointIds2[doubletId]]);
-      float r3 = hypot(x3[pointIds3[doubletId]], y3[pointIds3[doubletId]]);
+      float x1 = pointsX1[pointIds1[connectedDoubletId]];
+      float y1 = pointsY1[pointIds1[connectedDoubletId]];
+      float z1 = pointsZ1[pointIds1[connectedDoubletId]];
+      float x2 = pointsX2[pointIds2[doubletId]];
+      float y2 = pointsY2[pointIds2[doubletId]];
+      float z2 = pointsZ2[pointIds2[doubletId]];
+      float x3 = pointsX3[pointIds3[doubletId]];
+      float y3 = pointsY3[pointIds3[doubletId]];
+      float z3 = pointsZ3[pointIds3[doubletId]];
+      float r1 = hypot(x1, y1);
+      float r2 = hypot(x2, y2);
+      float r3 = hypot(x3, y3);
 
-      if (are_aligned_RZ(r1, z1[pointIds1[connectedDoubletId]], r2,
-                         z2[pointIds2[doubletId]], r3, z3[pointIds3[doubletId]],
-                         ptmin, thetaCut)) {
+      if (are_aligned_RZ(r1, z1, r2, z2, r3, z3, ptMin, thetaCut) &&
+          have_similar_curvature(x1, y1, x2, y2, x3, y3, regionOriginX,
+                                 regionOriginY, regionOriginRadius, phiCut)) {
         int oldSize = connectedDoubletsSizes[doubletIdStart + doubletId]++;
         if (oldSize < MAX_BUCKET_SIZE)
           connectedDoublets[(doubletIdStart + doubletId) * MAX_BUCKET_SIZE +
                             oldSize] = connectedDoubletId;
+        printf(".");
+      } else {
+        printf("#\n");
       }
     }
   }
