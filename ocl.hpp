@@ -139,6 +139,17 @@ class OCL {
     return hbuf;
   }
 
+  template <typename T>
+  void downloadTo(cl_mem dbuf, std::vector<T>& hbuf) {
+    size_t buf_size;
+    checkOclErrors(
+        clGetMemObjectInfo(dbuf, CL_MEM_SIZE, sizeof(size_t), &buf_size, NULL));
+    hbuf.resize(buf_size / sizeof(T));
+    checkOclErrors(clEnqueueReadBuffer(queue, dbuf, true, 0,
+                                       hbuf.size() * sizeof(T), hbuf.data(), 0,
+                                       NULL, NULL));
+  }
+
   void finish() { clFinish(queue); }
 
   template <typename... Args>

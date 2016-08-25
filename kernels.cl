@@ -1,5 +1,4 @@
 // template parameters:  MAX_BUCKET_SIZE
-
 __kernel void initBuckets(__global int* outerPointIds, int doubletCount,
                           __global int* pointBuckets,
                           __global int* pointBucketsSizes) {
@@ -65,6 +64,7 @@ bool have_similar_curvature(float x1, float y1, float x2, float y2, float x3,
   }
 }
 
+// template parameters:  MAX_BUCKET_SIZE
 __kernel void connectDoublets(
     global int* pointIds1, global int* pointIds2, global int* pointIds3,
     int doubletIdStart, int doubletIdEnd, global int* pointBuckets,
@@ -103,10 +103,72 @@ __kernel void connectDoublets(
         if (oldSize < MAX_BUCKET_SIZE)
           connectedDoublets[(doubletIdStart + doubletId) * MAX_BUCKET_SIZE +
                             oldSize] = connectedDoubletId;
-        printf(".");
+        // printf(".");
       } else {
-        printf("#\n");
+        // printf("#\n");
       }
+    }
+  }
+}
+
+// Tuplet: [nextDoublet | p1 | p2 | p3 | p4]
+// template parameters:  MAX_BUCKET_SIZE, TUPLET_SIZE
+__kernel void findNTupletsFirstLevel(
+    int doubletIdStart, int doubletIdEnd, global int* connectedDoublets,
+    global int* connectedDoubletsSizes, global int* nTuplets,
+    global int* nTupletCount, global int* outerPointIds,
+    global int* nextOuterPointIds, global int* nextInnerPointIds) {
+  int tidx = get_global_id(0);
+
+  for (int doubletId = tidx; doubletId < (doubletIdEnd - doubletIdStart);
+       doubletId += get_global_size(0)) {
+    int threadStart = atomic_add(
+        nTupletCount, connectedDoubletsSizes[doubletIdStart + doubletId]);
+    for (int conIdx = 0;
+         conIdx < connectedDoubletsSizes[doubletIdStart + doubletId];
+         conIdx++) {
+      int nextDoublet =
+          connectedDoublets[(doubletId + doubletIdStart) * MAX_BUCKET_SIZE +
+                            conIdx];
+      nTuplets[(threadStart + conIdx) * (TUPLET_SIZE + 1) + 0] = nextDoublet;
+      nTuplets[(threadStart + conIdx) * (TUPLET_SIZE + 1) + 1] =
+          outerPointIds[doubletId];
+      nTuplets[(threadStart + conIdx) * (TUPLET_SIZE + 1) + 2] =
+          nextOuterPointIds[nextDoublet];
+      nTuplets[(threadStart + conIdx) * (TUPLET_SIZE + 1) + 3] =
+          nextInnerPointIds[nextDoublet];
+    }
+  }
+}
+
+// Tuplet: [nextDoublet | p1 | p2 | p3 | p4]
+// template parameters:  MAX_BUCKET_SIZE, TUPLET_SIZE
+kernel void findNTuplets(int doubletOffset, global int* connectedDoublets,
+                         global int* connectedDoubletsSizes,
+                         global int* nTupletsSrc,
+                         global const int* tupletCountSrc,
+                         global int* nTupletsDst, global int* tupletCountDst,
+                         global int* innerPointIds, int iteration) {
+  int tidx = get_global_id(0);
+
+  for (int tupletId = tidx; tupletId < *tupletCountSrc;
+       tupletId += get_global_size(0)) {
+    int currentDoublet = nTupletsSrc[(TUPLET_SIZE + 1) * tupletId + 0];
+    int connectedDoubletCount =
+        connectedDoubletsSizes[doubletOffset + currentDoublet];
+
+    int threadStart = atomic_add(tupletCountDst, connectedDoubletCount);
+    for (int conIdx = 0; conIdx < connectedDoubletCount; conIdx++) {
+      int nextDoublet =
+          connectedDoublets[(currentDoublet + doubletOffset) * MAX_BUCKET_SIZE +
+                            conIdx];
+      nTupletsDst[(threadStart + conIdx) * (TUPLET_SIZE + 1) + 0] = nextDoublet;
+      for (int i = 0; i < iteration + 2; i++) {
+        nTupletsDst[(threadStart + conIdx) * (TUPLET_SIZE + 1) + 1 + i] =
+            nTupletsSrc[tupletId * (TUPLET_SIZE + 1) + 1 + i];
+      }
+      nTupletsDst[(threadStart + conIdx) * (TUPLET_SIZE + 1) + 3 + iteration] =
+          innerPointIds[nextDoublet];
     }
   }
 }

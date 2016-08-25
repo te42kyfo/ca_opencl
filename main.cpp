@@ -1,3 +1,4 @@
+#include <cmath>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -89,10 +90,20 @@ int main(int argc, char** argv) {
   OCL ocl(0);
   cl_kernel initBuckets_kernel =
       ocl.buildKernel("kernels.cl", "initBuckets",
-                      "-D MAX_BUCKET_SIZE=" + to_string(maxBucketSize));
+                      " -D TUPLET_SIZE=" + to_string(numLayers) +
+                          " -D MAX_BUCKET_SIZE=" + to_string(maxBucketSize));
   cl_kernel connectDoublets_kernel =
       ocl.buildKernel("kernels.cl", "connectDoublets",
-                      "-D MAX_BUCKET_SIZE=" + to_string(maxBucketSize));
+                      " -D TUPLET_SIZE=" + to_string(numLayers) +
+                          " -D MAX_BUCKET_SIZE=" + to_string(maxBucketSize));
+  cl_kernel findNTupletsFirstLevel_kernel =
+      ocl.buildKernel("kernels.cl", "findNTupletsFirstLevel",
+                      "-D TUPLET_SIZE=" + to_string(numLayers) +
+                          " -D MAX_BUCKET_SIZE=" + to_string(maxBucketSize));
+  cl_kernel findNTuplets_kernel =
+      ocl.buildKernel("kernels.cl", "findNTuplets",
+                      "-D TUPLET_SIZE=" + to_string(numLayers) +
+                          " -D MAX_BUCKET_SIZE=" + to_string(maxBucketSize));
 
   Fargs args;
   vector<vector<int>> innerPointIds(numLevels);
@@ -160,14 +171,40 @@ int main(int argc, char** argv) {
         args.phiCut);
   }
 
-  auto result = ocl.download<int>(d_connectedDoublets);
-  for (int i = 0; i < doubletStarts[numLevels]; i++) {
-    if (result[i * maxBucketSize] != 0) {
-      cout << i << " " << outerPointIds[0][i] << ": ";
-      for (int n = 0; n < maxBucketSize; n++) {
-        cout << result[i * maxBucketSize + n] << " ";
-      }
-      cout << "\n";
+  int maxNTupletCount =
+      innerPointIds[numLevels - 1].size() * pow(maxBucketSize, numLevels - 1);
+  vector<int> nTuplets(maxNTupletCount * (numLayers + 1));
+  vector<int> nTupletCount(1);
+
+  cl_mem d_nTupletsA = ocl.createAndUpload(nTuplets);
+  cl_mem d_nTupletsB = ocl.createAndUpload(nTuplets);
+  cl_mem d_nTupletCountA = ocl.createAndUpload(nTupletCount);
+  cl_mem d_nTupletCountB = ocl.createAndUpload(nTupletCount);
+
+  ocl.execute(findNTupletsFirstLevel_kernel, 1, {1}, {1},
+              doubletStarts[numLayers - 2], doubletStarts[numLayers - 1],
+              d_connectedDoublets, d_connectedDoubletsSizes, d_nTupletsA,
+              d_nTupletCountA, d_outerPointIds[numLevels - 1],
+              d_outerPointIds[numLevels - 2], d_innerPointIds[numLevels - 2]);
+
+  for (int iteration = 1; iteration <= numLayers - 3; iteration++) {
+    ocl.execute(findNTuplets_kernel, 1, {1}, {1},
+                doubletStarts[numLayers - 2 - iteration], d_connectedDoublets,
+                d_connectedDoubletsSizes, d_nTupletsA, d_nTupletCountA,
+                d_nTupletsB, d_nTupletCountB,
+                d_innerPointIds[numLayers - 3 - iteration], iteration);
+    swap(d_nTupletsA, d_nTupletsB);
+    int pattern = 0;
+    clEnqueueFillBuffer(ocl.queue, d_nTupletCountB, &pattern, sizeof(int), 0,
+                        sizeof(int), 0, NULL, NULL);
+  }
+
+  ocl.downloadTo(d_nTupletsA, nTuplets);
+
+  for (int i = 0; i < 10000; i+=200) {
+    for (int n = 0; n < numLayers + 1; n++) {
+      cout << nTuplets[i * (numLayers + 1) + n] << " ";
     }
+    cout << "\n";
   }
 }
