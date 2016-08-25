@@ -127,8 +127,6 @@ int main(int argc, char** argv) {
     d_outerPointIds[level] = ocl.createAndUpload(outerPointIds[level]);
     doubletStarts[level + 1] =
         doubletStarts[level] + innerPointIds[level].size();
-    cout << level << ": " << innerPointIds[level].size() << " "
-         << outerPointIds[level].size() << "\n";
   }
   int totalPointCount = 0;
   for (int layer = 0; layer < numLayers; layer++) {
@@ -194,17 +192,20 @@ int main(int argc, char** argv) {
                 d_nTupletsB, d_nTupletCountB,
                 d_innerPointIds[numLayers - 3 - iteration], iteration);
     swap(d_nTupletsA, d_nTupletsB);
+    swap(d_nTupletCountA, d_nTupletCountB);
     int pattern = 0;
     clEnqueueFillBuffer(ocl.queue, d_nTupletCountB, &pattern, sizeof(int), 0,
                         sizeof(int), 0, NULL, NULL);
   }
 
+  ocl.downloadTo(d_nTupletCountA, nTupletCount);
   ocl.downloadTo(d_nTupletsA, nTuplets);
 
-  for (int i = 0; i < 10000; i+=200) {
-    for (int n = 0; n < numLayers + 1; n++) {
-      cout << nTuplets[i * (numLayers + 1) + n] << " ";
+  ofstream file("log.out");
+  for (int i = 0; i < nTupletCount[0]; i++) {
+    for (int n = 0; n < numLayers; n++) {
+      file << nTuplets[i * (numLayers + 1) + n + 1] << " ";
     }
-    cout << "\n";
+    file << "\n";
   }
 }
