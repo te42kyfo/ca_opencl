@@ -2,13 +2,14 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <iomanip>
 #include "ocl.hpp"
 
 using namespace std;
 
 const int numLayers = 4;
 const int numLevels = numLayers - 1;
-const int maxBucketSize = 64;
+const int maxBucketSize = 40;
 
 struct Fargs {
   float ptMin;
@@ -37,6 +38,16 @@ d_XYZVector createAndUploadXYZVector(OCL& ocl, XYZVector vec) {
   result.Y = ocl.createAndUpload(vec.Y);
   result.Z = ocl.createAndUpload(vec.Z);
   return result;
+}
+
+#include <sys/time.h>
+
+double dtime() {
+  double tseconds = 0;
+  struct timeval t;
+  gettimeofday(&t, NULL);
+  tseconds = (double)t.tv_sec + (double)t.tv_usec * 1.0e-6;
+  return tseconds;
 }
 
 void dataLoad(string filename, Fargs& args, vector<vector<int>>& innerPointIds,
@@ -88,6 +99,10 @@ void dataLoad(string filename, Fargs& args, vector<vector<int>>& innerPointIds,
 
 int main(int argc, char** argv) {
   OCL ocl(0);
+
+  size_t workgroupSize = 8;
+  size_t workgroupCount = 4;
+
   cl_kernel initBuckets_kernel =
       ocl.buildKernel("kernels.cl", "initBuckets",
                       " -D TUPLET_SIZE=" + to_string(numLayers) +
@@ -139,15 +154,18 @@ int main(int argc, char** argv) {
   vector<cl_mem> d_pointBuckets(numLevels);
   vector<cl_mem> d_pointBucketsSizes(numLevels);
 
+  double t1 = dtime();
   for (int level = 0; level < numLevels; level++) {
     pointBuckets[level].resize(maxBucketSize * points[level + 1].X.size());
     pointBucketsSizes[level].resize(points[level + 1].X.size());
     d_pointBuckets[level] = ocl.createAndUpload(pointBuckets[level]);
     d_pointBucketsSizes[level] = ocl.createAndUpload(pointBucketsSizes[level]);
-    ocl.execute(initBuckets_kernel, 1, {1}, {1}, d_outerPointIds[level],
+    ocl.execute(initBuckets_kernel, 1, {workgroupSize*workgroupCount}, {workgroupSize}, d_outerPointIds[level],
                 (int)outerPointIds[level].size(), d_pointBuckets[level],
                 d_pointBucketsSizes[level]);
   }
+  ocl.finish();
+  double t2 = dtime();
 
   vector<int> connectedDoublets(doubletStarts[numLayers - 1] * maxBucketSize);
   vector<int> connectedDoubletsSizes(doubletStarts[numLayers - 1], 0);
@@ -155,9 +173,10 @@ int main(int argc, char** argv) {
   cl_mem d_connectedDoublets = ocl.createAndUpload(connectedDoublets);
   cl_mem d_connectedDoubletsSizes = ocl.createAndUpload(connectedDoubletsSizes);
 
+  double t3 = dtime();
   for (int level = 1; level < numLevels; level++) {
     ocl.execute(
-        connectDoublets_kernel, 1, {1}, {1}, d_innerPointIds[level - 1],
+        connectDoublets_kernel, 1, {workgroupSize*workgroupCount}, {workgroupSize}, d_innerPointIds[level - 1],
         d_innerPointIds[level], d_outerPointIds[level], doubletStarts[level],
         doubletStarts[level + 1], d_pointBuckets[level - 1],
         d_pointBucketsSizes[level - 1], d_connectedDoublets,
@@ -168,6 +187,8 @@ int main(int argc, char** argv) {
         args.regionOriginY, args.regionOriginRadius, args.thetaCut,
         args.phiCut);
   }
+  ocl.finish();
+  double t4 = dtime();
 
   int maxNTupletCount =
       innerPointIds[numLevels - 1].size() * pow(maxBucketSize, numLevels - 1);
@@ -179,14 +200,15 @@ int main(int argc, char** argv) {
   cl_mem d_nTupletCountA = ocl.createAndUpload(nTupletCount);
   cl_mem d_nTupletCountB = ocl.createAndUpload(nTupletCount);
 
-  ocl.execute(findNTupletsFirstLevel_kernel, 1, {1}, {1},
+  double t5 = dtime();
+  ocl.execute(findNTupletsFirstLevel_kernel, 1, {workgroupSize*workgroupCount}, {workgroupSize},
               doubletStarts[numLayers - 2], doubletStarts[numLayers - 1],
               d_connectedDoublets, d_connectedDoubletsSizes, d_nTupletsA,
               d_nTupletCountA, d_outerPointIds[numLevels - 1],
               d_outerPointIds[numLevels - 2], d_innerPointIds[numLevels - 2]);
 
   for (int iteration = 1; iteration <= numLayers - 3; iteration++) {
-    ocl.execute(findNTuplets_kernel, 1, {1}, {1},
+    ocl.execute(findNTuplets_kernel, 1, {workgroupSize*workgroupCount}, {workgroupSize},
                 doubletStarts[numLayers - 2 - iteration], d_connectedDoublets,
                 d_connectedDoubletsSizes, d_nTupletsA, d_nTupletCountA,
                 d_nTupletsB, d_nTupletCountB,
@@ -197,6 +219,8 @@ int main(int argc, char** argv) {
     clEnqueueFillBuffer(ocl.queue, d_nTupletCountB, &pattern, sizeof(int), 0,
                         sizeof(int), 0, NULL, NULL);
   }
+  ocl.finish();
+  double t6 = dtime();
 
   ocl.downloadTo(d_nTupletCountA, nTupletCount);
   ocl.downloadTo(d_nTupletsA, nTuplets);
@@ -208,4 +232,7 @@ int main(int argc, char** argv) {
     }
     file << "\n";
   }
+
+  cout << setprecision(3);
+  cout << (t2 - t1)*1000.0 << " " << (t4 - t3)*1000.0 << " " << (t6 - t5)*1000.0 << "\n";
 }
